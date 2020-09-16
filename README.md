@@ -41,7 +41,7 @@ And you are done!
 
 You will need a microphone. The application is made with the intent that it has to work with almost every microhpone regarding it's quality. Obviously, the higher the quality, the better.
 
-You will also need a piano clost to your computer display so you can see the screen while you play.
+You will also need a piano close to your computer display so you can see the screen while you play.
 
 The piano must be close to the microhpone too so it registers correctly the sound.
 
