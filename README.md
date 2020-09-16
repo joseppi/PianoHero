@@ -1,6 +1,8 @@
 # Piano Hero
 
-Piano Hero is a desktop application that teaches you piano by telling the user when he needs to press which key in an intuitive way.
+Piano Hero is a desktop application that teaches you piano by telling the user when he needs to press which key in an intuitive way. It uses your microphone to capture the sound of your piano and translate it in to inputs that the Piano Hero can understand.
+
+![pianoherotrailer](https://github.com/joseppi/PianoHero/blob/master/ReadmeImages/PianoHeroTrailer.gif)
 
 The purpose of this application is to proof that you can learn music using common devices and technology. It also serves as a base for other programmers/designers/musician to build an application upon it.
 
