@@ -6,7 +6,7 @@ using UnityEngine.Audio;
 
 using System;
 
-[RequireComponent (typeof (AudioSource))]
+[RequireComponent(typeof(AudioSource))]
 public class PitchDetector : MonoBehaviour
 {
     struct FFTFreqBand
@@ -22,500 +22,272 @@ public class PitchDetector : MonoBehaviour
             this.Freq = freq;
         }
     }
-    
+
     // Microphone input
-    public bool use_microphone;
-    public AudioClip audioClip;
-    public string selectedDevice;
-    public string[] micDevices;
-    public AudioMixerGroup mixerGroupMicrophone, mixerGroupMaster; 
-
-
-    public static float[] freqBand = new float[8];
-    public static float[] samples = new float[1024];
-
-    FFTFreqBand[] samplesStored = new FFTFreqBand[10];    
-    public float audioProfile;
-
-    public enum _channel { Stereo, Left, Right };
-    public _channel channel = new _channel ();
-
+    public AudioMixerGroup mixerGroupMicrophone, mixerGroupMaster;
+    TMPro.TMP_Dropdown displayInputDevices;
+    List<string> inputDevices = new List<string>();
     AudioSource audioSource;
+    bool use_microphone;
+    AudioClip audioClip;
+    string selectedDevice;
+    string[] micDevices;
+    public float decibelDetectionClosingValue = 25.0f;
+    public float detectionOpeningValue = 0.005f;
+
+    //Storing Samples    
+    public static float[] samples = new float[2048];
+    public static float[] samplesdB = new float[2048];
+    public static float[] samplesVal = new float[2048];    
+    public static float[,] samplesValStored = new float[512,3];
+    float[] storedMaxVal = new float[3];
+    float[] samplesSavedFreq = new float[10];
+    FFTFreqBand[] samplesStored = new FFTFreqBand[10];
+
+    //UI Display
     Text pitchDisplay;
     Text avgPitchDisplay;
     Text noteDisplay;
     Text harmonicNoteDisplay;
     String note = "Note Display";
-
-    FFTFreqBand[] savedVals = new FFTFreqBand[3];
-    float dt = 0.0f;
-    float dt2 = 0.0f;
-    float[] freqValues = new float[3];
+        
     float storeddB = 0.0f;
-    float frequencyOutput = 0.0f;
-    float freqperBand;    
+    float storeVal = 0.0f;
+    float fundamentalFrequencyOutput = 0.0f;
+    float freqperBand;
 
-    //TODO improve tolerance detection
-    float tolerance = 13.0f;
+    private float rmsValue = 0.0f;
+    private float dbValue = 0.0f;
+    private float refValue;
 
     // Start is called before the first frame update
     void Start()
     {
+        refValue = 0.001f;
         audioSource = GetComponent<AudioSource>();
-        pitchDisplay = GameObject.Find("Pitch Display").GetComponent<Text>();
-        avgPitchDisplay = GameObject.Find("Avg Pitch Display").GetComponent<Text>();
-        noteDisplay = GameObject.Find("Note Display").GetComponent<Text>();
-        harmonicNoteDisplay = GameObject.Find("Harmonic Note Display").GetComponent<Text>();
-
         freqperBand = 24000.0f / samples.Length;
 
-        if (use_microphone)
-        {
-            if (Microphone.devices.Length > 0)
-            {
-                micDevices = Microphone.devices;                
-                audioSource.outputAudioMixerGroup = mixerGroupMicrophone;
-                audioSource.clip = Microphone.Start(micDevices[0], true, 600, AudioSettings.outputSampleRate);
-            }
-            else
-                use_microphone = false;
-        }
-        if (!use_microphone)
-        {
-            audioSource.outputAudioMixerGroup = mixerGroupMaster;
-            audioSource.clip = audioClip;
-        }
-        for (int i = 0; i < micDevices.Length;i++)
-        {
-            //Debug.Log(micDevices[i]);
-        }
-        audioSource.Play();
 
-        
+
+
+        //displayInputDevices.AddOptions(inputDevices);
+
+    }
+
+    public void StartRecording()
+    {       
+        if (Microphone.devices.Length > 0)
+        {
+            micDevices = Microphone.devices;
+            audioSource.outputAudioMixerGroup = mixerGroupMicrophone;
+            audioSource.clip = Microphone.Start(micDevices[0], false, 60, AudioSettings.outputSampleRate);
+        }
+
+        if (Microphone.IsRecording(micDevices[0]))
+        {
+            while (!(Microphone.GetPosition(micDevices[0]) > 0)) { }
+            audioSource.Play();
+        }
+
+        for (int i = 0; i < micDevices.Length; i++)
+        {
+            inputDevices.Add(micDevices[i]);
+        }
     }
 
     // Update is called once per frame
     void Update()
     {
         GetSpectrumAudioSource();
-        //MakeFrequencyBands();
-        //PitchCalc();
         AvgPitchCalc();
         GetNoteName();
-        //DebugAudioFile();        
     }
 
-    private void GetNoteName()
+    void GetSpectrumAudioSource()
     {
-        /*
-         * La 220
-         * 13
-         * La# 233
-         * 13
-         * Si 246
-         * 15
-         * Do 261 (Middle C)
-         * 16
-         * Do# 277 
-         * 16
-         * Re 293
-         * 18
-         * Re# 311
-         * 18
-         * Mi 329
-         * 20
-         * Fa 349
-         * 20
-         * Fa# 369
-         * 22
-         * Sol 391
-         * 24
-         * Sol# 415
-         * 25
-         * La 440 (Base Frequency)
-         * 26
-         * La# 466
-         * 27
-         * Si 493
-         * 30
-         * Do 523
-         * 31
-         * Do# 554
-         * 33
-         * Re 587
-         * 35
-         * Re# 622
-         * 37
-         * Mi 659
-         * 39
-         * Fa 698
-         * 41
-         * Fa# 739
-         * 44
-         * Sol 783 
-         * 47
-         * Sol# 830
-         * 50
-         * La 880
-         * 52
-         * La# 932
-         * 55
-         * Si 987
-         * 
-         * 
-         * 
-         */
-        String[] musicalNotes = new string[12] {"La/A", "La#", "Si/B", "Do/C", "Do#", "Re/D", "Re#", "Mi/E", "Fa/F", "Fa#", "Sol/G", "Sol#"};
-
-        float[] samplesSavedFreq = new float[10];
-
-        float detectFreq = 0.0f;
-        for (int i = 0; i < samplesStored.Length;i++)
+        //We are using hamming window because it reduces the sidelobes.
+        audioSource.GetSpectrumData(samples, 0, FFTWindow.Hamming);
+    }
+    private bool ValueDetection(float value)
+    {
+        int i = 0;
+        float maxVal = 0;
+        
+        for (i = 0; i < (samples.Length / 4); i++)
         {
-            samplesSavedFreq[i] = samplesStored[i].Freq;
-            detectFreq += samplesStored[i].Freq;
+            //Get Highest Value
+            if (samples[i] > maxVal)
+            {
+                maxVal = samples[i];
+
+            }
         }
         
-        if (detectFreq > 0.0f)
+        //Debug.Log(maxVal);
+        if (maxVal < 0.00001) maxVal = 0; // clamp it to 0 val
+        if (maxVal > value)
         {
-            note = null;
-            //Relate pitch to musical notation with harmonics.
-            for (int i = 0; i < 12; i++)
+            if (storedMaxVal[0] > maxVal && storedMaxVal[1] > maxVal && storedMaxVal[2] > maxVal)
             {
-                float testNoteIterator = Mathf.Pow(2.0f, i / 12.0f) * 261.6f;
-                //Identify the most low freq and associate it with musical notation
-                if (frequencyOutput > testNoteIterator - tolerance)
+                //Debug.Log(maxVal + " ------------------------------------------------------Accepted Opening");
+                for (int y = 0; y < 512;y++)
                 {
-                    if (frequencyOutput < testNoteIterator + tolerance)
-                    {
-                        //Check his harmonics
-                        for (int j = 0; j < samplesSavedFreq.Length; j++)
-                        {                            
-                            if (j != i && samplesSavedFreq[j] > 0.0f)
-                            {                                
-                                note = HarmonicDetection(samplesSavedFreq[j], testNoteIterator, 2.0f);
-                                if (note != null)
-                                {
-                                    NotesInteractionHandler.noteID = i;
-                                    break;
-                                }
-                                note = HarmonicDetection(samplesSavedFreq[j], testNoteIterator, 3.0f);
-                                if (note != null)
-                                {
-                                    NotesInteractionHandler.noteID = i;
-                                    break;
-                                }
-                                note = HarmonicDetection(samplesSavedFreq[j], testNoteIterator, 4.0f);
-                                if (note != null)
-                                {
-                                    NotesInteractionHandler.noteID = i;
-                                    break;
-                                }
-                                note = HarmonicDetection(samplesSavedFreq[j], testNoteIterator, 5.0f);
-                                if (note != null)
-                                {
-                                    NotesInteractionHandler.noteID = i;
-                                    break;
-                                }
-                                note = HarmonicDetection(samplesSavedFreq[j], testNoteIterator, 6.0f);
-                                if (note != null)
-                                {
-                                    NotesInteractionHandler.noteID = i;
-                                    break;
-                                }
-                                note = HarmonicDetection(samplesSavedFreq[j], testNoteIterator, 7.0f);
-                                if (note != null)
-                                {
-                                    NotesInteractionHandler.noteID = i;
-                                    break;
-                                }
-                                note = HarmonicDetection(samplesSavedFreq[j], testNoteIterator, 8.0f);
-                                if (note != null)
-                                {
-                                    NotesInteractionHandler.noteID = i;
-                                    break;
-                                }
-                                note = HarmonicDetection(samplesSavedFreq[j], testNoteIterator, 9.0f);
-                                if (note != null)
-                                {
-                                    NotesInteractionHandler.noteID = i;
-                                    break;
-                                }
-                            }                            
-                        }
-                        //note = musicalNotes[i];
-                    }
+                    samples[y] = samplesValStored[y,0];
                 }
-                if (note != null) break;                
-            }
-        }
+                storedMaxVal = new float[3];
 
-        if (note != null)
-        {
-            harmonicNoteDisplay.text = note.ToString();
-            
-        }
-        note = null;
-        noteDisplay.text = pitchToNote(frequencyOutput);// note.ToString();        
-    }
-
-    private String HarmonicDetection(float sample, float testNoteIterator, float harmonicNumber)
-    {
-        float harmPitch = testNoteIterator * harmonicNumber;
-        if (sample > harmPitch - freqperBand/2)
-        {
-            if (sample < harmPitch + freqperBand/2)
-            {
-                //Debug.Log("Harmonic number "+ harmonicNumber + "of " + pitchToNote(testNoteIterator)  + " Detected!");
-                return pitchToNote(testNoteIterator);
-            }
-        }
-        return null;
-    }
-
-    private String pitchToNote(float pitch)
-    {
-        String[] musicalNotes = new string[12] { "La/A", "La#", "Si/B", "Do/C", "Do#", "Re/D", "Re#", "Mi/E", "Fa/F", "Fa#", "Sol/G", "Sol#"};
-        for (int i = 0; i < 24; i++)
-        {
-            float testNoteIterator = Mathf.Pow(2.0f, i / 12.0f) * 220.0f;
-            //Debug.Log(frequDisplayTest);
-            if (pitch > testNoteIterator - tolerance)
-            {
-                if (pitch < testNoteIterator + tolerance)
-                {
-                    if (i >= 12)
-                    {
-                        i = i - 12;                        
-                        return musicalNotes[i];                        
-                    }
-                    else
-                    {                        
-                        return musicalNotes[i];                        
-                    }
-                }
-            }
-        }
-
-        return null;
-
-    }    
-
-    private void PitchCalc()
-    {
-        //Mic detects sound
-        bool isDetecting = false;        
-        float dB = 0.0f;
-        for (int i = 0; i < samples.Length;i++)
-        {
-            dB += samples[i];
-        }
-        dB /= freqperBand;
-        dB *= 100;
-
-        if (dB > 0.1)
-        {
-            isDetecting = true;
-        }
-        else
-        {
-            isDetecting = false;            
-        }
-        dt += Time.deltaTime;
-        if (isDetecting)
-        {
-            dt = 0.0f;
-        }
-
-        if (dt < 0.5)
-        {                                   
-            //find the highest freqband peak
-            float maxVal = -1;
-            int maxIndex = -1;
-            for (int i = 0; i < samples.Length; ++i)
-            {
-                float v = samples[i];
-                if (v > maxVal)
-                {
-                    maxVal = v;
-                    maxIndex = i;
-                }
-            }
-
-            //Calculate fundamental frequency
-            float freq = maxIndex * freqperBand + maxVal * freqperBand;
-
-            //This are the frequencies of the piano
-            if (freq > 27.5f && freq < 4186.0f)
-            {
-                pitchDisplay.text = freq.ToString() + maxIndex.ToString();
-                //frequencyOutput = freq;
-            }
-        }
-        else
-        {
-            pitchDisplay.text = "Pitch";
-        }
-               
-    }
-
-
-    private void AvgPitchCalc()
-    {
-        //Mic detects sound
-        bool isDetecting = false;
-        
-        float dB = 0.0f;
-        for (int i = 0; i < samples.Length; i++)
-        {
-            dB += samples[i];
-        }
-        dB *= 100;
-        //TODO only detect one window
-        //TODO 2 detect the highest window in a period of time
-        if (dB > 3.0f)
-        {
-            //Debug.Log(dB);
-            if (dB > storeddB)
-            {
-                
-                storeddB = dB;
+                return true;                                                   
             }
             else
             {
-                storeddB = 0.0f;
-                isDetecting = true;
-                
-            }
-            
-            
-        }
-        else
-        {
-            isDetecting = false;
-            NotesInteractionHandler.noteID = -1;
-        }
-
-
-        dt2 += Time.deltaTime;
-
-        if (isDetecting)// && dt2 > 0.5) //seconds mic will stay shutdown after a detection
-        {
-            dt2 = 0.0f;
-            //Debug.Log(dB + "detected");
-
-            //Checking all the samples
-            for (int i = 0; i < samples.Length; ++i)
-            {
-                //Get the value of a sample
-                float v = samples[i];
-                
-                //high-pass filter
-                if (v > 0.001f)
+                for (int it = 0; it < storedMaxVal.Length; it++)
                 {
-                    //Iterate though saved values
-                    float itFreq = i * freqperBand;
-                    FFTFreqBand itV = new FFTFreqBand(v, i, itFreq);
-
-                    InsertArray(samplesStored, samplesStored.Length, itV);
-
-                    //Old code
-                    for (int j = 0; j < samplesStored.Length; j++)
-                    {                        
-                        //if (v > samplesStored[j].Value)
-                        //{
-                        //    if (j+1 < samplesStored.Length && samplesStored[j].Value != 0)
-                        //    {
-                        //        samplesStored[j + 1] = samplesStored[j];
-                        //    }                            
-                        //    samplesStored[j].Index = i;
-                        //    samplesStored[j].Value = v;
-                        //    samplesStored[j].Freq = i * freqperBand;                            
-                        //    //sampleStoredFreq.Add(i * freqperBand);   
-                        //    break;
-                        //}                        
-                    }                       
-                }              
-            }
-
-            float finalFreq = 4186.0f;
-
-            float[] samplesSavedFreq = new float[10];
-
-            if (samplesStored[0].Freq > 27.5f) //we use 27.5hz since it's the lowest frequency a piano can make.
-            {
-                FFTFreqBand itVal = new FFTFreqBand(0.0f, 0.0f, 0.0f);
-                //Apply a noise filter
-                for (int i = 0; i < samplesStored.Length;i++)
-                {
-                    itVal = samplesStored[i];
-                    for (int j = 0; j < samplesStored.Length; j++)
-                    {                        
-                        if (i != j)
-                        {
-                            //Detect if it's an harmonic
-                            if (itVal.Index + 1 == samplesStored[j].Index || itVal.Index-1 == samplesStored[j].Index)
-                            {                                
-                                //Who has higher dB?
-                                if (itVal.Value > samplesStored[j].Value)
-                                {
-                                    //float valueDif = itVal.Value * 100.0f - samplesStored[j].Value * 100.0f;
-                                    //float removeFreq = valueDif * freqperBand/2;
-                                    //itVal.Freq -= removeFreq;
-
-                                    //float valueDif = 1.0f - (samplesStored[i].Value*100.0f);
-                                    //float freqRest = valueDif * freqperBand;
-                                    //itVal.Freq += freqRest;
-                                    samplesStored[j] = new FFTFreqBand(0.0f,0.0f,0.0f);
-                                }
-                            }
-                            
-                        }
-                        
-                        
-                    }
-                    samplesStored[i] = itVal;
-                }
-                
-
-                //Get the most lower pitch frequency as a fundamental frequency
-                for (int i = 0; i < samplesStored.Length; i++)
-                {
-                    samplesSavedFreq[i] = samplesStored[i].Freq;
-                }
-                
-                for (int i = 0; i < samplesSavedFreq.Length; i++)
-                {
-                    if (samplesSavedFreq[i] > 0.0f && samplesSavedFreq[i] < finalFreq)
+                    if (storedMaxVal[it] < maxVal)
                     {
-                        finalFreq = samplesSavedFreq[i];
+                        storedMaxVal[it] = maxVal;
+                        for (i = 0; i < (samples.Length / 4); i++)
+                        {
+                            samplesValStored[i, it] = samples[i];
+                        }
+                        break;
                     }
                 }
-                frequencyOutput = finalFreq;
-
-                //This are the frequencies of the piano 27.5hz to 4186.0hz
-                if (finalFreq > 0.0f && finalFreq < 4186.0f)
-                {
-                    avgPitchDisplay.text = finalFreq.ToString();
-                }
-
-                
+                storeVal = maxVal;
+                return false;
             }
-            finalFreq = 4186.0f;
-            isDetecting = false;
         }
-        else
+        return false;
+    }
+    private bool ValueDetectionOpening(float value)
+    {
+        int i = 0;
+        float maxVal = 0;
+        for (i = 0; i < (samples.Length / 4); i++)
         {
-            //avgPitchDisplay.text = "AVGPitch";            
-            samplesStored = new FFTFreqBand[10];
-            
+            //Get Highest Value
+            if (samples[i] > maxVal)
+            {
+                maxVal = samples[i];
+            }
+        }
+        //Debug.Log(maxVal);
+        if (maxVal < 0.00001) maxVal = 0; // clamp it to 0 val
+        if (maxVal > value)
+        {
+            if (storeVal > maxVal)
+            {
+                //Debug.Log(maxVal + " ------------------------------------------------------Accepted Opening");                
+                storeVal = 0.0f;
+                return true;
+            }
+            else
+            {
+                storeVal = maxVal;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private bool ValueDetectionClosing(float value)
+    {
+        int i = 0;
+        float maxVal = 0;
+        for (i = 0; i < (samples.Length / 4); i++)
+        {
+            //Get Highest Value
+            if (samples[i] > maxVal)
+            {
+                maxVal = samples[i];
+            }
         }
 
+        if (maxVal < 0.00001) maxVal = 0; // clamp it to 0 val
+        if (maxVal > value)
+        {
+            if (storeVal > maxVal)
+            {
+                Debug.Log(maxVal + " Accepted Opening");
+                storeVal = 0.0f;
+                return true;
+            }
+            else
+            {
+                storeVal = maxVal;
+                return false;
+            }
+        }
+        return false;
     }
+
+    //Mic Detection is in charge of start/stop the pitch algorithm
+    private bool DecibelDetectionOpening(float openingdBs)
+    {
+        audioSource.GetOutputData(samplesdB, 0); // fill array with samples
+        int i = 0;
+        float sum = 0;
+        for (i = 0; i < samplesdB.Length; i++)
+        {
+            sum += samplesdB[i] * samplesdB[i]; // sum squared samples
+        }
+        rmsValue = Mathf.Sqrt(sum / samplesdB.Length); // rms = square root of average
+        dbValue = 20 * Mathf.Log10(rmsValue / refValue); // calculate dB
+        if (dbValue < -160) dbValue = -160; // clamp it to -160dB min
+        if (dbValue > openingdBs)
+        {
+            if (storeddB > dbValue)
+            {
+                //Debug.Log(dbValue + " Accepted Opening");
+                storeddB = 0.0f;
+                return true;
+            }
+            else
+            {
+                storeddB = dbValue;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    //Mic Detection is in charge of start/stop the pitch algorithm
+    private bool DecibelDetectionClosing(float closingdBs)
+    {
+        //Debug.Log("Current dB value " + dbValue);
+        audioSource.GetOutputData(samplesdB, 0); // fill array with samples
+        int i = 0;
+        float sum = 0;
+        for (i = 0; i < samplesdB.Length; i++)
+        {
+            sum += samplesdB[i] * samplesdB[i]; // sum squared samples
+        }
+        rmsValue = Mathf.Sqrt(sum / samplesdB.Length); // rms = square root of average
+        dbValue = 20 * Mathf.Log10(rmsValue / refValue); // calculate dB
+        if (dbValue < -160) dbValue = -160; // clamp it to -160dB min
+        if (dbValue < closingdBs)
+        {
+            if (storeddB < dbValue)
+            {
+                //Debug.Log(dbValue + " Accepted Closing");
+                storeddB = 0.0f;
+                NotesInteractionHandler.noteID = -1;
+                return true;
+            }
+            else
+            {
+                storeddB = dbValue;
+                return false;
+            }
+        }
+
+
+        return false;
+    }
+
     void InsertArray(FFTFreqBand[] sampleArr, int size, FFTFreqBand sample)
-    {        
+    {
         List<FFTFreqBand> store = new List<FFTFreqBand>();
-        for (int i = 0;i <sampleArr.Length;i++)
+        for (int i = 0; i < sampleArr.Length; i++)
         {
             //Is the new value higher than the value from the list?
             if (sample.Value < sampleArr[i].Value)
@@ -527,28 +299,18 @@ public class PitchDetector : MonoBehaviour
             {
                 //Save the new value
                 store.Add(sample);
-
                 //Save the remaining part of the list
-                for (int j = i;j<size;j++)
+                for (int j = i; j < size; j++)
                 {
                     //As long as it's not empty
-                    if (sampleArr[j].Value > 0.0f)
-                    {
-                        store.Add(sampleArr[j]);
-                    }
-                    else
-                    {
-                        break;
-                    }
-                    
+                    if (sampleArr[j].Value > 0.0f) { store.Add(sampleArr[j]); }
+                    else { break; }
                 }
                 break;
             }
-
-
         }
         int count = 0;
-        foreach(FFTFreqBand ret in store)
+        foreach (FFTFreqBand ret in store)
         {
             if (count < size)
             {
@@ -556,21 +318,191 @@ public class PitchDetector : MonoBehaviour
                 count++;
             }
             else
-            {
                 break;
-            }
-        }               
+        }
     }
 
-    void OnGUI()
+    private void AvgPitchCalc()
     {
-        //String str = savedVals[0].index.ToString() + "_" + savedVals[1].index.ToString() + "_" + savedVals[2].index.ToString();
-        //GUILayout.TextArea(str);
-        if (GUILayout.Button("A"))
+        DecibelDetectionClosing(decibelDetectionClosingValue);        
+        if (ValueDetection(detectionOpeningValue))
         {
+            //Checking all the samples
+            for (int i = 0; i < (samples.Length / 4); ++i)
+            {
+                //Get the value of a sample
+                float v = samples[i];
 
+                //high-pass filter
+                if (v > 0.001f)
+                {
+                    //Iterate though saved values
+                    float itFreq = i * freqperBand;
+                    FFTFreqBand itV = new FFTFreqBand(v, i, itFreq);
+
+                    InsertArray(samplesStored, samplesStored.Length, itV);
+                }
+            }
+
+            if (samplesStored[0].Freq > 27.5f) //we use 27.5hz since it's the lowest frequency a piano can make.
+            {
+                FFTFreqBand itVal = new FFTFreqBand(0.0f, 0.0f, 0.0f);
+
+                //Delete the frequency samples that their band indexs are adjecent based on their lowest value                
+                for (int i = 0; i < samplesStored.Length; i++)
+                {
+                    itVal = samplesStored[i];
+                    for (int j = 0; j < samplesStored.Length; j++)
+                    {
+                        //Don't compare the iterated frequency with itself.
+                        if (i != j)
+                        {
+                            //Look for adjecent frequency bands
+                            if (itVal.Index + 1 == samplesStored[j].Index || itVal.Index - 1 == samplesStored[j].Index)
+                            {
+                                //Delete the band with less value than the other.
+                                if (itVal.Value > samplesStored[j].Value)
+                                {
+                                    samplesStored[j] = new FFTFreqBand(0.0f, 0.0f, 0.0f);
+                                }
+                            }
+
+                        }
+                    }
+                    samplesStored[i] = itVal;
+                }
+
+                //Save the frequencies in another list for optimized calculations
+                for (int i = 0; i < samplesStored.Length; i++)
+                {
+                    samplesSavedFreq[i] = samplesStored[i].Freq;
+                }
+
+                fundamentalFrequencyOutput = 4186.0f;
+                FFTFreqBand fundamentalSample = new FFTFreqBand(0.0f, 0.0f, 0.0f);
+                for (int i = 0; i < samplesSavedFreq.Length; i++)
+                {
+                    //Get the lowest frequency detected and save it.
+                    if (samplesSavedFreq[i] > 0.0f && samplesSavedFreq[i] < fundamentalFrequencyOutput)
+                    {
+                        fundamentalFrequencyOutput = samplesSavedFreq[i];
+                    }
+                }
+            }
+        }
+        else
+        {
+            //avgPitchDisplay.text = "AVGPitch";            
+            samplesStored = new FFTFreqBand[10];
+        }
+    }
+
+    IEnumerator OpenMicDelay(float time)
+    {
+        yield return new WaitForSeconds(time);
+    }
+
+    private void GetNoteName()
+    {
+        //This are the frequencies of the piano 27.5hz to 4186.0hz
+        //We set it to 246 since it's the lowest frequency we are looking 
+        if (fundamentalFrequencyOutput > 246.5f)
+        {
+            note = null;
+            //Relate pitch to musical notation with harmonics.
+            for (int i = 0; i < 24; i++) //Check from Do 261.6freq to Do 522freq
+            {
+                //Get the pitch of the note we are comparing
+                float testPitchIterator = Mathf.Pow(2.0f, i / 12.0f) * 261.6f;
+
+                //Get variable tolerance
+                //tolerance[0] is the difference of testPitch and testPitch-1
+                //tolernace[1] is the difference of testPitch+1 and testPitch
+                float[] tolerance = GetTolerance(i);
+
+                //Identify the most low freq and look for his musical notation.
+                if (fundamentalFrequencyOutput > testPitchIterator - tolerance[0])
+                {
+                    if (fundamentalFrequencyOutput < testPitchIterator + tolerance[1])
+                    {
+                        //Check his harmonics
+                        for (int j = 0; j < samplesSavedFreq.Length; j++)
+                        {
+                            if (samplesSavedFreq[j] > 0.0f)
+                            {
+                                note = HarmonicDetection(samplesSavedFreq[j], testPitchIterator, tolerance, 2.0f);
+                                if (note != null)
+                                {
+                                    NotesInteractionHandler.noteID = i;
+                                    break;
+                                }
+                                note = HarmonicDetection(samplesSavedFreq[j], testPitchIterator, tolerance, 3.0f);
+                                if (note != null)
+                                {
+                                    NotesInteractionHandler.noteID = i;
+                                    break;
+                                }
+                                note = HarmonicDetection(samplesSavedFreq[j], testPitchIterator, tolerance, 4.0f);
+                                if (note != null)
+                                {
+                                    NotesInteractionHandler.noteID = i;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (note != null) break;
+            }
         }
 
+        note = null;
+        fundamentalFrequencyOutput = 0;
+    }
+
+    private float[] GetTolerance(int index)
+    {
+        float[] ret = { 0.0f, 0.0f };
+        float testPitchIterator = Mathf.Pow(2.0f, index / 12.0f) * 261.6f;
+        float testNoteIteratorBelow = Mathf.Pow(2.0f, (index - 1) / 12.0f) * 261.6f;
+        float testNoteIteratorAbove = Mathf.Pow(2.0f, (index + 1) / 12.0f) * 261.6f;
+        ret[0] = testPitchIterator - testNoteIteratorBelow; //Minus Tolerance
+        ret[1] = testNoteIteratorAbove - testPitchIterator; //Plus Tolerance
+
+
+        return ret;
+    }
+
+    private String HarmonicDetection(float sample, float testNoteIterator, float[] tolerance, float harmonicNumber)
+    {
+        float harmPitch = testNoteIterator * harmonicNumber;
+        if (sample > harmPitch - tolerance[0])
+        {
+            if (sample < harmPitch + tolerance[1])
+            {
+                //Debug.Log("Harmonic number "+ harmonicNumber + "of " + pitchToNote(testNoteIterator)  + " Detected!");
+                return pitchToNote(testNoteIterator);
+            }
+        }
+        return null;
+    }
+
+    private String pitchToNote(float pitch)
+    {
+        String[] musicalNotes = new string[24] { "Do/C", "Do#", "Re/D", "Re#", "Mi/E", "Fa/F", "Fa#", "Sol/G", "Sol#", "La/A", "La#", "Si/B", "Do/C", "Do#", "Re/D", "Re#", "Mi/E", "Fa/F", "Fa#", "Sol/G", "Sol#", "La/A", "La#", "Si/B" };
+        for (int i = 0; i < 24; i++)
+        {
+            float testNoteIterator = Mathf.Pow(2.0f, i / 12.0f) * 261.6f;
+            float[] tolerance = GetTolerance(i);
+            if (pitch > testNoteIterator - tolerance[0])
+            {
+                if (pitch < testNoteIterator + tolerance[1])
+                {
+                    return musicalNotes[i];
+                }
+            }
+        }
+        return null;
     }
 
     private void DebugAudioFile()
@@ -581,53 +513,77 @@ public class PitchDetector : MonoBehaviour
         Debug.Log(audioClip.samples.ToString());
     }
 
-    private void MakeFrequencyBands()
+    public void DropDownValueChanged(int value)
     {
-        /*
-         * 22050 / 512 = 48 hertz
-         * 20 - 60 
-         * 60-250
-         * 250-500
-         * 500-2000
-         * 2000-400
-         * 4000-6000
-         * 6000-20000
-         * 
-         * 0-2 = 86 hz
-         * 1-4 = 172 hz
-         * 2-8 = 344 hz
-         * 3-16 = 688 hz
-         * 4-32 = 1376 hz
-         * 5-64 = 2752 hz
-         * 6-128 = 5504 hz
-         * 7-256 = 11008 hz
-         * 
-        */
+        Microphone.End(selectedDevice);
+        audioSource.Stop();
+        audioSource.clip = null;
 
-        int count = 0;
 
-        for (int i = 0; i < 8; i++)
-        {
-            float average = 0;
-            int sampleCount = (int)Mathf.Pow(2, i) * 2;
-            if (i == 7)
-            {
-                sampleCount += 2;
-            }
-            for (int j = 0; j < sampleCount; j++)
-            {
-                average += samples[count] * (count + 1);
-                count++;
-            }
-            average /= count;
-            freqBand[i] = average * 30;
-        }
-
+        audioSource.clip = Microphone.Start(micDevices[value], true, 600, AudioSettings.outputSampleRate);
+        selectedDevice = micDevices[value];
+        audioSource.Play();
     }
 
-    void GetSpectrumAudioSource()
-    {
-        //We are using hamming window because it reduces the sidelobes.
-        audioSource.GetSpectrumData(samples, 0, FFTWindow.Hamming);
-    }
+
+    /*
+ * La 220
+ * 13
+ * La# 233
+ * 13
+ * Si 246
+ * 15
+ * Do 261 (Middle C)
+ * 16
+ * Do# 277 
+ * 16
+ * Re 293
+ * 18
+ * Re# 311
+ * 18
+ * Mi 329
+ * 20
+ * Fa 349
+ * 20
+ * Fa# 369
+ * 22
+ * Sol 391
+ * 24
+ * Sol# 415
+ * 25
+ * La 440 (Base Frequency)
+ * 26
+ * La# 466
+ * 27
+ * Si 493
+ * 30
+ * Do 523
+ * 31
+ * Do# 554
+ * 33
+ * Re 587
+ * 35
+ * Re# 622
+ * 37
+ * Mi 659
+ * 39
+ * Fa 698
+ * 41
+ * Fa# 739
+ * 44
+ * Sol 783 
+ * 47
+ * Sol# 830
+ * 50
+ * La 880
+ * 52
+ * La# 932
+ * 55
+ * Si 987
+ * 
+ * 
+ * 
+ */
+
+
 }

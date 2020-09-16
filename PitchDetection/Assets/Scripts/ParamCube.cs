@@ -16,6 +16,6 @@ public class ParamCube : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        transform.localScale = new Vector3(transform.localScale.x, (PitchDetector.freqBand[band] * scaleMultiplier) + startScale, transform.localScale.z);
+        //transform.localScale = new Vector3(transform.localScale.x, (PitchDetector.freqBand[band] * scaleMultiplier) + startScale, transform.localScale.z);
     }
 }

@@ -5,6 +5,10 @@ TagManager:
   serializedVersion: 2
   tags:
   - SongParent
+  - fallingNote
+  - SongDisplay
+  - StartGameButton
+  - Settings
   layers:
   - Default
   - TransparentFX
