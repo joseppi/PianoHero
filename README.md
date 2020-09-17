@@ -6,6 +6,8 @@ Piano Hero is a desktop application that teaches you piano by telling the user w
 
 The purpose of this application is to proof that you can learn music using common devices and technology. It also serves as a base for other programmers/designers/musician to build an application upon it.
 
+I also wrote a paper since this is a project I made for my university. You can find a very detailed explanation of how everything works by going in to this [link.](https://docs.google.com/document/d/1j_b-u6IG61AU1inhVlMKbQgT70R91iZ6t19C8UNpfoA/edit?usp=sharing)
+
 ## Getting Started
 
 Before you start the application, you need to setup your microphone to ensure you have a good experience.
@@ -67,7 +69,7 @@ This project is licensed under the MIT License - see the [LICENSE.md](https://gi
 
 ## Acknowledgments
 
-* There are few people that without their help, this project could've not been possible.
+There are few people that without their help, this project could've not been possible.
 * Jesus he was my mentor during the development of the app. Althought audio processing was not his strongest suit, he still gave me feedback in to how to improve the application and make it better for everyone from a prespective that I couldn't grasp from where I was.
 * David was the teacher that guide me during all the audio process coding and optimization. He fixed many, if not all, coding related problems but also knew when to stop to let me figure out things my way.
 * All the testers that gave me their time to make the application with a better user experience with very little changes.
